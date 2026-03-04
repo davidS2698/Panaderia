@@ -1,53 +1,23 @@
-
 /*
-
+===========================================================
 PROYECTO: PANADERÍA WEB3
-
 DESCRIPCIÓN GENERAL:
 
-Este programa simula una panadería descentralizada en la
-blockchain de Solana.
+Este programa implementa una panadería descentralizada
+utilizando Program Derived Addresses (PDAs).
 
 Permite:
+- Crear una panadería asociada a un propietario.
+- Crear productos como cuentas independientes.
+- Comprar productos reduciendo stock.
+- Llevar un registro global del total vendido.
 
-1. Crear una panadería asociada a un propietario.
-2. Crear productos como cuentas independientes (PDA).
-3. Comprar productos reduciendo stock.
-4. Registrar el total vendido en una cuenta global.
-
-
-ARQUITECTURA:
-
-- Panaderia (PDA)
-  Seeds: ["panaderia", owner]
-
-- Producto (PDA por producto)
-  Seeds: ["producto", panaderia, nombre]
-
-- VentasGlobales (PDA única por panadería)
-  Seeds: ["ventas", panaderia]
-
-FLUJO DE USO:
-
-1) El owner crea la panadería.
-2) El owner inicializa la cuenta de ventas globales.
-3) El owner agrega productos.
-4) Un cliente compra productos.
-5) Se actualiza el total vendido automáticamente.
-
-
-OBJETIVO:
-
-Demostrar uso de:
-- Program Derived Addresses (PDA)
-- Validaciones con require!
-- Manejo de estado en Solana
-- Arquitectura tipo CRUD
-- Relaciones entre cuentas
 
 ===========================================================
 */
+
 use anchor_lang::prelude::*;
+
 
 declare_id!("B3FSbwEyMDzC4nUSwacmKuaz3ez3EaRRSBiwz875zwUZ");
 
@@ -55,16 +25,21 @@ declare_id!("B3FSbwEyMDzC4nUSwacmKuaz3ez3EaRRSBiwz875zwUZ");
 pub mod panaderia_web3 {
     use super::*;
 
-    // =============================
-    // CREAR PANADERIA
-    // =============================
+    // =====================================================
+    // CREAR PANADERÍA
+    // =====================================================
+    // Crea una nueva cuenta PDA que representa una panadería.
+    // Seeds utilizadas: ["panaderia", owner]
+    // Solo puede existir una panadería por propietario.
     pub fn crear_panaderia(
         ctx: Context<CrearPanaderia>,
         nombre: String,
     ) -> Result<()> {
 
+        // Validación: el nombre no debe estar vacío
         require!(!nombre.trim().is_empty(), Errores::NombreVacio);
 
+        // Inicialización de la cuenta PDA
         ctx.accounts.panaderia.set_inner(Panaderia {
             owner: ctx.accounts.owner.key(),
             nombre,
@@ -74,13 +49,17 @@ pub mod panaderia_web3 {
         Ok(())
     }
 
-    // =============================
+    // =====================================================
     // INICIALIZAR VENTAS GLOBALES
-    // =============================
+    // =====================================================
+    // Crea una cuenta PDA que almacenará el total vendido.
+    // Seeds utilizadas: ["ventas", panaderia]
+    // Solo el propietario puede inicializarla.
     pub fn inicializar_ventas(
         ctx: Context<InicializarVentas>,
     ) -> Result<()> {
 
+        // Se inicia el contador global en cero
         ctx.accounts.ventas_globales.set_inner(VentasGlobales {
             panaderia: ctx.accounts.panaderia.key(),
             total_vendido: 0,
@@ -90,9 +69,13 @@ pub mod panaderia_web3 {
         Ok(())
     }
 
-    // =============================
+    // =====================================================
     // AGREGAR PRODUCTO
-    // =============================
+    // =====================================================
+    // Crea un nuevo producto como cuenta PDA independiente.
+    // Seeds utilizadas:
+    // ["producto", panaderia, nombre]
+    // Solo el propietario puede crear productos.
     pub fn agregar_producto(
         ctx: Context<AgregarProducto>,
         nombre: String,
@@ -100,10 +83,12 @@ pub mod panaderia_web3 {
         stock: u16,
     ) -> Result<()> {
 
+        // Validaciones de integridad
         require!(!nombre.trim().is_empty(), Errores::NombreVacio);
         require!(precio > 0, Errores::PrecioInvalido);
         require!(stock > 0, Errores::StockInvalido);
 
+        // Inicialización del producto
         ctx.accounts.producto.set_inner(Producto {
             panaderia: ctx.accounts.panaderia.key(),
             nombre,
@@ -116,29 +101,41 @@ pub mod panaderia_web3 {
         Ok(())
     }
 
-    // =============================
+    // =====================================================
     // COMPRAR PRODUCTO
-    // =============================
+    // =====================================================
+    // Permite a un cliente comprar cierta cantidad.
+    // - Reduce el stock.
+    // - Marca como no disponible si llega a cero.
+    // - Actualiza el total vendido global.
     pub fn comprar_producto(
         ctx: Context<ComprarProducto>,
         cantidad: u16,
     ) -> Result<()> {
 
+        // Validación de cantidad válida
         require!(cantidad > 0, Errores::CantidadInvalida);
 
         let producto = &mut ctx.accounts.producto;
 
+        // Verifica disponibilidad
         require!(producto.disponible, Errores::ProductoNoDisponible);
+
+        // Verifica stock suficiente
         require!(producto.stock >= cantidad, Errores::StockInsuficiente);
 
+        // Cálculo del total pagado
         let total_pagado = producto.precio * cantidad as u64;
 
+        // Actualización de stock
         producto.stock -= cantidad;
 
+        // Si se agota el stock, se marca como no disponible
         if producto.stock == 0 {
             producto.disponible = false;
         }
 
+        // Se acumula el total vendido en la cuenta global
         ctx.accounts.ventas_globales.total_vendido += total_pagado;
 
         msg!("Compra realizada. Total pagado: {}", total_pagado);
@@ -146,9 +143,11 @@ pub mod panaderia_web3 {
         Ok(())
     }
 
-    // =============================
+    // =====================================================
     // VER TOTAL VENDIDO
-    // =============================
+    // =====================================================
+    // Muestra el total acumulado almacenado en la cuenta
+    // VentasGlobales.
     pub fn ver_total_vendido(
         ctx: Context<VerVentas>,
     ) -> Result<()> {
@@ -162,49 +161,53 @@ pub mod panaderia_web3 {
     }
 }
 
-// =============================
-// CUENTAS
-// =============================
+// =====================================================
+// CUENTAS (ESTADO EN BLOCKCHAIN)
+// =====================================================
 
+// Representa una panadería en la blockchain.
 #[account]
 #[derive(InitSpace)]
 pub struct Panaderia {
-    pub owner: Pubkey,
+    pub owner: Pubkey, // Propietario de la panadería
 
     #[max_len(60)]
-    pub nombre: String,
+    pub nombre: String, // Nombre comercial
 }
 
+// Representa un producto individual.
 #[account]
 #[derive(InitSpace)]
 pub struct Producto {
-    pub panaderia: Pubkey,
+    pub panaderia: Pubkey, // Relación con la panadería
 
     #[max_len(60)]
-    pub nombre: String,
+    pub nombre: String, // Nombre del producto
 
-    pub precio: u64,
-    pub stock: u16,
-    pub disponible: bool,
+    pub precio: u64,     // Precio unitario
+    pub stock: u16,      // Stock disponible
+    pub disponible: bool,// Estado de disponibilidad
 }
 
+// Cuenta que almacena el total vendido acumulado.
 #[account]
 #[derive(InitSpace)]
 pub struct VentasGlobales {
-    pub panaderia: Pubkey,
-    pub total_vendido: u64,
+    pub panaderia: Pubkey, // Relación con la panadería
+    pub total_vendido: u64,// Total acumulado de ventas
 }
 
-// =============================
-// CONTEXTOS
-// =============================
+// =====================================================
+// CONTEXTOS (VALIDACIÓN DE CUENTAS)
+// =====================================================
 
+// Contexto necesario para crear una panadería.
 #[derive(Accounts)]
 #[instruction(nombre: String)]
 pub struct CrearPanaderia<'info> {
 
     #[account(mut)]
-    pub owner: Signer<'info>,
+    pub owner: Signer<'info>, // Quien paga la creación
 
     #[account(
         init,
@@ -218,6 +221,7 @@ pub struct CrearPanaderia<'info> {
     pub system_program: Program<'info, System>,
 }
 
+// Contexto para inicializar la cuenta de ventas.
 #[derive(Accounts)]
 pub struct InicializarVentas<'info> {
 
@@ -235,10 +239,7 @@ pub struct InicializarVentas<'info> {
         init,
         payer = owner,
         space = 8 + VentasGlobales::INIT_SPACE,
-        seeds = [
-            b"ventas",
-            panaderia.key().as_ref()
-        ],
+        seeds = [b"ventas", panaderia.key().as_ref()],
         bump
     )]
     pub ventas_globales: Account<'info, VentasGlobales>,
@@ -246,6 +247,7 @@ pub struct InicializarVentas<'info> {
     pub system_program: Program<'info, System>,
 }
 
+// Contexto para agregar productos.
 #[derive(Accounts)]
 #[instruction(nombre: String)]
 pub struct AgregarProducto<'info> {
@@ -276,11 +278,12 @@ pub struct AgregarProducto<'info> {
     pub system_program: Program<'info, System>,
 }
 
+// Contexto para comprar productos.
 #[derive(Accounts)]
 pub struct ComprarProducto<'info> {
 
     #[account(mut)]
-    pub cliente: Signer<'info>,
+    pub cliente: Signer<'info>, // Cliente que ejecuta la compra
 
     pub panaderia: Account<'info, Panaderia>,
 
@@ -289,15 +292,13 @@ pub struct ComprarProducto<'info> {
 
     #[account(
         mut,
-        seeds = [
-            b"ventas",
-            panaderia.key().as_ref()
-        ],
+        seeds = [b"ventas", panaderia.key().as_ref()],
         bump
     )]
     pub ventas_globales: Account<'info, VentasGlobales>,
 }
 
+// Contexto para consultar ventas.
 #[derive(Accounts)]
 pub struct VerVentas<'info> {
 
@@ -310,10 +311,11 @@ pub struct VerVentas<'info> {
     pub panaderia: Account<'info, Panaderia>,
 }
 
-// =============================
-// ERRORES
-// =============================
+// =====================================================
+// ERRORES PERSONALIZADOS
+// =====================================================
 
+// Errores definidos para validaciones del programa.
 #[error_code]
 pub enum Errores {
 
